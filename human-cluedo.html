@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Human Cluedo Manager</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; line-height: 1.5; background: #f4f4f4; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        input, button, textarea { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; }
+        button:disabled { background: #ccc; }
+        .hidden { display: none; }
+        .host-only { border: 2px solid #007bff; padding: 10px; background: #e7f3ff; }
+        code { background: #eee; padding: 2px 5px; word-break: break-all; }
+    </style>
+</head>
+<body>
+
+    <h2>Human Cluedo: 17 Players</h2>
+
+    <div id="login-section" class="card">
+        <label>Enter your Name to Start:</label>
+        <input type="text" id="user-name" placeholder="Exactly as Dougal spelled it...">
+        <button onclick="login()">Login</button>
+    </div>
+
+    <div id="submission-section" class="card hidden">
+        <h3 id="welcome-msg"></h3>
+        <label>Proposed Murder Object:</label>
+        <input type="text" id="obj-input" placeholder="e.g. A rubber duck">
+        <label>Proposed Murder Location:</label>
+        <input type="text" id="loc-input" placeholder="e.g. The kitchen">
+        <button id="submit-btn" onclick="generatePlayerCode()">Generate My Sync Code</button>
+        
+        <div id="player-output" class="hidden">
+            <p>Copy the code below and send it to <strong>Dougal</strong>:</p>
+            <textarea id="sync-code-output" readonly rows="3"></textarea>
+        </div>
+    </div>
+
+    <div id="host-section" class="card host-only hidden">
+        <h3>Host Dashboard (Dougal)</h3>
+        <p>Players Checked In: <span id="player-count">0</span> / 17</p>
+        <label>Paste a Player's Sync Code here:</label>
+        <textarea id="host-import-input" placeholder="Paste code from WhatsApp here..."></textarea>
+        <button onclick="importPlayerData()">Add Player Data</button>
+        
+        <button id="finalize-btn" class="hidden" onclick="generateAssignments()" style="background: #28a745;">FINALIZE ALL ASSIGNMENTS</button>
+        
+        <div id="master-assignments" class="hidden">
+            <p><strong>Assignments Created!</strong> Copy the Master State and send it to everyone so they can view their targets.</p>
+            <textarea id="master-state-output" readonly rows="5"></textarea>
+        </div>
+    </div>
+
+    <div id="view-section" class="card hidden">
+        <h3>Your Assignment</h3>
+        <label>Paste the Master State Code from Dougal:</label>
+        <textarea id="viewer-import" placeholder="Paste Master Code here..."></textarea>
+        <button onclick="viewMyTarget()">View My Target</button>
+        
+        <div id="target-details" class="hidden" style="background: #fff3cd; padding: 15px; border-left: 5px solid #ffc107;">
+            <p><strong>Your Target:</strong> <span id="display-target"></span></p>
+            <p><strong>Object:</strong> <span id="display-object"></span></p>
+            <p><strong>Location:</strong> <span id="display-location"></span></p>
+            <hr>
+            <p><small>Take a screenshot now!</small></p>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = "";
+        let gameState = JSON.parse(localStorage.getItem('cluedo_state')) || { players: [] };
+
+        function login() {
+            currentUser = document.getElementById('user-name').value.trim().toLowerCase();
+            if (!currentUser) return alert("Enter a name!");
+            
+            document.getElementById('login-section').classList.add('hidden');
+            document.getElementById('submission-section').classList.remove('hidden');
+            document.getElementById('view-section').classList.remove('hidden');
+            document.getElementById('welcome-msg').innerText = "Hello, " + currentUser;
+
+            if (currentUser === "dougal") {
+                document.getElementById('host-section').classList.remove('hidden');
+                updateHostUI();
+            }
+        }
+
+        // --- PLAYER LOGIC ---
+        function generatePlayerCode() {
+            const obj = document.getElementById('obj-input').value.trim();
+            const loc = document.getElementById('loc-input').value.trim();
+            if (!obj || !loc) return alert("Fill in both fields!");
+
+            const data = { name: currentUser, object: obj, location: loc };
+            const encoded = btoa(JSON.stringify(data)); // Simple Base64 encode
+            
+            document.getElementById('sync-code-output').value = encoded;
+            document.getElementById('player-output').classList.remove('hidden');
+        }
+
+        // --- HOST LOGIC ---
+        function importPlayerData() {
+            try {
+                const raw = document.getElementById('host-import-input').value.trim();
+                const decoded = JSON.parse(atob(raw));
+                
+                // Avoid duplicates
+                gameState.players = gameState.players.filter(p => p.name !== decoded.name);
+                gameState.players.push(decoded);
+                
+                localStorage.setItem('cluedo_state', JSON.stringify(gameState));
+                document.getElementById('host-import-input').value = "";
+                updateHostUI();
+            } catch (e) {
+                alert("Invalid code. Make sure you copied the whole thing!");
+            }
+        }
+
+        function updateHostUI() {
+            document.getElementById('player-count').innerText = gameState.players.length;
+            if (gameState.players.length >= 17) {
+                document.getElementById('finalize-btn').classList.remove('hidden');
+            }
+        }
+
+        function generateAssignments() {
+            const players = [...gameState.players];
+            // 1. Shuffle players for Hamiltonian Cycle
+            for (let i = players.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [players[i], players[j]] = [players[j], players[i]];
+            }
+
+            // 2. Shuffle Objects and Locations independently
+            const objects = players.map(p => p.object).sort(() => Math.random() - 0.5);
+            const locations = players.map(p => p.location).sort(() => Math.random() - 0.5);
+
+            const assignments = {};
+            players.forEach((p, i) => {
+                const target = players[(i + 1) % players.length];
+                assignments[p.name] = {
+                    target: target.name,
+                    object: objects[i],
+                    location: locations[i]
+                };
+            });
+
+            const finalState = btoa(JSON.stringify(assignments));
+            document.getElementById('master-state-output').value = finalState;
+            document.getElementById('master-assignments').classList.remove('hidden');
+        }
+
+        // --- VIEWER LOGIC ---
+        function viewMyTarget() {
+            try {
+                const raw = document.getElementById('viewer-import').value.trim();
+                const assignments = JSON.parse(atob(raw));
+                const myData = assignments[currentUser];
+
+                if (!myData) {
+                    alert("Your name isn't in this assignment list. Check spelling!");
+                    return;
+                }
+
+                document.getElementById('display-target').innerText = myData.target.toUpperCase();
+                document.getElementById('display-object').innerText = myData.object;
+                document.getElementById('display-location').innerText = myData.location;
+                document.getElementById('target-details').classList.remove('hidden');
+            } catch (e) {
+                alert("Invalid Master Code!");
+            }
+        }
+    </script>
+</body>
+</html>
